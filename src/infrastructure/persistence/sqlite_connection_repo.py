@@ -17,7 +17,7 @@ class SQLiteConnectionRepository:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO connection_registry (dbname, alias, host, port, db_user, dialect, schema_name, connection_uri, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(alias) DO UPDATE SET
                 dbname = excluded.dbname,
                 host = excluded.host,

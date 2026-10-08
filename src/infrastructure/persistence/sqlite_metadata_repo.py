@@ -18,7 +18,7 @@ class SQLiteMetadataRepository:
         cursor = conn.cursor()
 
         # Clear hashtable lama untuk alias ini jika re-sync
-        cursor.execute( "DELETE FROM hashtable_store WHERE alias = ?", (alias))
+        cursor.execute( "DELETE FROM hashtable_store WHERE alias = ?", (alias,))
 
         records = [ (alias, hash_id, full_path) for hash_id, full_path in hashtable_data.items()]
 

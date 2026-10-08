@@ -134,7 +134,6 @@ def get_semantic_context(alias: str) -> str:
     """
     return mdl_engine_service.get_context(alias)
 
-
 @mcp.tool()
 def parse_and_translate_sql(alias: str, hash_sql: str) -> str:
     """

@@ -464,23 +464,44 @@ The agent should not attempt to determine schema checksums or manually manage MD
 
 ## 14. Dashboard and Report Generation
 
-Dashboard generation is not the primary responsibility of MDLEngine.
+MDLEngine supports dashboard generation as a dashboard artifact capability.
 
-If the agent has access to other tools capable of generating dashboards or files, those tools may be used after obtaining and analyzing database results.
+When a dashboard is requested, the agent should generate a self-contained HTML5 dashboard based on the user's analytical intent, available semantic metadata, and validated query results.
 
-The presence of:
+Dashboard generation workflow:
 
-    save_dashboard_html()
+1. Determine the analytical intent and information that should be presented.
+2. Retrieve the necessary semantic context.
+3. Identify the relevant entities, relationships, and metrics from the semantic context.
+4. Generate and validate the required SQL queries.
+5. Translate hash SQL into executable database SQL using `parse_and_translate_sql()`.
+6. Execute the translated SQL through the appropriate database execution mechanism.
+7. Analyze the returned results and determine suitable visualizations and dashboard structure.
+8. Generate the dashboard as an HTML5 document.
+9. Save the generated HTML to the agreed dashboard output location using `save_dashboard_html()`.
 
-does not mean every analytical request requires an HTML dashboard.
+The agent should make reasonable design decisions automatically. Users are not expected to provide detailed dashboard specifications such as chart types, layouts, colors, or visualization configurations unless they explicitly want to.
 
-Use it only when:
+When choosing the dashboard structure, prioritize:
+
+* Clear communication of the requested analysis.
+* Appropriate visualization types for the underlying data.
+* Useful summaries and key indicators.
+* Readability and ease of interpretation.
+* A coherent and professional visual layout.
+
+Do not generate a dashboard for every analytical request. Generate one when:
 
 * The user explicitly requests a dashboard.
-* The generated HTML is useful for the requested analysis.
-* The agent has enough query results to construct the dashboard.
+* A dashboard is clearly useful for the requested analysis.
+* Sufficient validated query results are available to populate the dashboard.
 
-Do not generate dashboards unnecessarily.
+The agent is responsible for determining the dashboard structure, visualization types, layout, and presentation based on the user's intent and the available data.
+
+MDLEngine is responsible for providing the semantic context and SQL translation capabilities required to obtain reliable data for the dashboard.
+
+Dashboard generation must not bypass semantic validation or SQL translation.
+
 
 ---
 

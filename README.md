@@ -4,7 +4,7 @@
 
 MDLEngine is a lightweight MCP server that acts as a semantic translation layer between an LLM agent and a relational database.
 
-It allows an LLM to reason about database structure using **opaque hash identifiers** instead of exposing the original database identifiers directly. The generated hash-based SQL is then deterministically translated back into native SQL before execution.
+It allows an LLM to reason about database structure using **stable hash identifiers** instead of relying on raw database identifiers throughout its working context. The generated hash-based SQL is then deterministically translated back into native SQL before execution.
 
 The core idea:
 
@@ -12,7 +12,7 @@ The core idea:
 flowchart TD
     DB["Database Schema"]
     INGEST["Metadata Ingestion"]
-    HASH["Opaque Hash Identifiers"]
+    HASH["Stable Hash Identifiers"]
     CONTEXT["Semantic Context"]
     LLM["LLM Agent"]
     HSQL["Hash-based SQL"]
@@ -36,8 +36,8 @@ flowchart TD
 
 LLM-based SQL generation introduces several problems when the model interacts directly with a database:
 
-* Database identifiers may contain sensitive or implementation-specific information.
-* Large schemas are difficult to provide as raw context.
+* Large schemas are difficult to reason about consistently.
+* Identifiers can become ambiguous when many databases and connections are involved.
 * Generated SQL is probabilistic and should not directly become executable SQL.
 * Business relationships and semantic definitions often exist outside the physical database schema.
 * The database schema may change and the semantic context needs to remain synchronized.
@@ -45,6 +45,8 @@ LLM-based SQL generation introduces several problems when the model interacts di
 MDLEngine separates these concerns.
 
 The LLM works with a semantic representation of the database, while MDLEngine is responsible for deterministic identifier resolution and SQL translation.
+
+The hash identifiers are **not intended as a security or privacy boundary**. Their primary purpose is to provide stable object identity and reduce identifier ambiguity, especially when an agent needs to reason across multiple connections.
 
 ---
 
@@ -54,13 +56,19 @@ The LLM works with a semantic representation of the database, while MDLEngine is
 
 Database objects are converted into deterministic hash identifiers.
 
+The canonical internal path includes the connection alias and physical database identity:
+
+```text
+<alias>::<dbname>::<schema>::<table>::<column>
+```
+
 For example:
 
 ```text
-analytics::sales::orders::customer_id
+staging::application::sales::orders::customer_id
 ```
 
-becomes:
+becomes a stable hash identifier such as:
 
 ```text
 h_8f31c2...
@@ -69,7 +77,7 @@ h_8f31c2...
 The original identifier is stored in an internal hashmap:
 
 ```text
-h_8f31c2... → analytics::sales::orders::customer_id
+h_8f31c2... → staging::application::sales::orders::customer_id
 ```
 
 The `::` delimiter is simply the canonical internal representation used to construct hierarchical database paths before hashing. It is not a core feature by itself.
@@ -115,7 +123,7 @@ h_99d1... = customer_id
 h_42ce... = order.customer_id
 ```
 
-together with their relationships and business metadata, without requiring the original identifiers in its working context.
+together with their relationships and business metadata.
 
 ---
 
@@ -135,17 +143,7 @@ JOIN h_order
 GROUP BY h_customer_name;
 ```
 
-MDLEngine parses the SQL into an AST using `sqlglot`, resolves the hash identifiers, and produces native SQL:
-
-```sql
-SELECT
-    customer.name,
-    COUNT(orders.id)
-FROM customer
-JOIN orders
-    ON customer.id = orders.customer_id
-GROUP BY customer.name;
-```
+MDLEngine parses the SQL into an AST using `sqlglot`, resolves the hash identifiers, and produces native SQL.
 
 The important boundary is:
 
@@ -284,90 +282,54 @@ flowchart TD
 
 A schema fingerprint is used for change detection so that unchanged databases do not require unnecessary metadata regeneration.
 
-The fingerprint is a synchronization mechanism and is separate from the hash identifiers used for database object abstraction.
+The fingerprint is a synchronization mechanism and is separate from the hash identifiers used for database object identity.
 
 ---
 
 ## Metadata Storage
 
-The current implementation stores generated metadata as human-readable YAML files.
+The current implementation stores generated MDL metadata as human-readable YAML files and internal state in SQLite.
+
+Per-connection MDL files are stored under:
 
 ```text
-~/.src/
+~/.mdlEngine/
 └── configs/
-    ├── mdl.yaml
-    ├── hashmap.yaml
-    ├── relations.yaml
-    └── metrics.yaml
+    └── local_mdl_<alias>.yaml
 ```
 
-### `mdl.yaml`
-
-Contains the structural database metadata:
-
-```text
-Database
-└── Schema
-    └── Table
-        └── Column
-```
-
-### `hashmap.yaml`
-
-Stores the mapping between opaque identifiers and their canonical database paths.
-
-```text
-h_xxx → database::schema::table
-h_yyy → database::schema::table::column
-```
-
-### `relations.yaml`
-
-Contains relationships that may not be fully represented by physical foreign keys.
-
-### `metrics.yaml`
-
-Contains business-level definitions used when constructing semantic context for the LLM.
-
-These files are intentionally human-readable and editable.
-
----
-
-## Internal Registry
-
-SQLite is used for internal application state that is not part of the semantic metadata itself.
-
-Typical responsibilities include:
-
-* Registered database connections
-* Metadata synchronization state
-* SQL translation audit logs
-* Internal application metadata
+SQLite stores internal state in:
 
 ```text
 ~/.mdlEngine/
 └── metadata.db
 ```
 
-SQLite is an implementation detail and can be replaced without changing the semantic translation model.
+The SQLite database currently stores:
+
+* Registered database connections
+* Hash-to-canonical-path mappings
+* Relationship metadata
+* Schema fingerprints
+* SQL translation audit logs
+
+The alias is the logical identity used to address a connection. The physical `dbname` is connection metadata and does not need to be globally unique.
 
 ---
 
 ## MCP Tools
 
-| Tool                      | Parameters                                                                   | Description                                                                |
-| ------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `list_connections`        | None                                                                         | Lists registered database connections.                                     |
-| `sync_database_metadata`  | `dbname`, connection information, `dialect`, `schema_name`, `force_reingest` | Inspects the target database and synchronizes semantic metadata.           |
-| `get_semantic_context`    | `dbname`                                                                     | Returns the combined MDL, relations, and metrics context for an LLM agent. |
-| `parse_and_translate_sql` | `dbname`, `hash_sql`                                                         | Parses hash-based SQL, resolves identifiers, and produces native SQL.      |
-| `save_dashboard_html`     | `filename`, `html_content`                                                   | Saves generated dashboard/report artifacts.                                |
+| Tool | Parameters | Description |
+| --- | --- | --- |
+| `list_connections` | None | Lists registered database connections. |
+| `sync_database_metadata` | `alias`, connection information, `dialect`, `schema_name`, `force_reingest` | Inspects the target database and synchronizes semantic metadata. |
+| `get_semantic_context` | `alias` | Returns the combined MDL, relations, and semantic metadata context for an LLM agent. |
+| `parse_and_translate_sql` | `alias`, `hash_sql` | Parses hash-based SQL, resolves identifiers, and produces native SQL. |
+| `save_dashboard_html` | `filename`, `html_content` | Saves generated dashboard/report artifacts. |
 
 ---
 
 ## Installation
-
-### Install MDLEngine
 
 From the project root:
 
@@ -379,43 +341,30 @@ pip install .
 
 ## Running with Hermes
 
-MDLEngine can be installed directly into an existing Hermes container.
+MDLEngine is designed to run as a separate service alongside an agent such as Hermes.
 
-### 1. Copy the package
+A typical deployment uses Docker Compose with both services attached to the same Docker network:
 
-From the MDLEngine project directory:
-
-```bash
-docker cp . <hermes_container>:/tmp/mdl_engine
+```text
+Hermes
+  │
+  │ MCP / SSE
+  ▼
+MDLEngine
+  │
+  ▼
+Target Database(s)
 ```
 
-### 2. Install
+The MDLEngine service listens on port `38000` for its SSE MCP transport. Within a Docker Compose network, Hermes can connect to the MDLEngine service using its Compose service name rather than a host IP.
 
-```bash
-docker exec -it <hermes_container> \
-    pip install /tmp/mdl_engine
+For example, if the service is named `mdl-engine`:
+
+```text
+http://mdl-engine:38000
 ```
 
-### 3. Generate Agent Skills
-
-```bash
-docker exec -it <hermes_container> \
-    python3 -m src.ports_in.mcp.setup_skills
-```
-
-### 4. Register the MCP Server
-
-Add MDLEngine to the Hermes MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "mdl_engine": {
-      "command": "mdl-engine"
-    }
-  }
-}
-```
+The exact MCP configuration depends on the Hermes deployment and its MCP client configuration.
 
 ---
 
@@ -457,7 +406,6 @@ MDLEngine currently focuses on:
 * Hash-based identifier abstraction
 * Semantic metadata representation
 * Relationship metadata
-* Business metric metadata
 * Hash-based SQL translation
 * AST-based SQL processing
 * MCP integration

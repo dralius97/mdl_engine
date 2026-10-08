@@ -4,6 +4,7 @@ from ..transformations.hasher import generate_shake128_hash
 
 def parse_raw_schema_to_mdl(
     dbname: str,
+    alias:str,
     raw_schemas: Dict[str, Any]
 ) -> Tuple[Dict[str, Any], Dict[str, str]]:
     """
@@ -17,7 +18,7 @@ def parse_raw_schema_to_mdl(
         tables_data = {}
 
         for table_name, table_info in tables.items():
-            table_path = f"{dbname}::{schema}::{table_name}"
+            table_path = f"{alias}::{dbname}::{schema}::{table_name}"
             table_hash = generate_shake128_hash(table_path)
             flat_hashmap[table_hash] = table_path
 
@@ -60,13 +61,13 @@ def parse_raw_schema_to_mdl(
 
                 referred_hashes = [
                     generate_shake128_hash(
-                        f"{dbname}::{ref_schema}::{ref_table}::{rc}"
+                        f"{alias}::{dbname}::{ref_schema}::{ref_table}::{rc}"
                     )
                     for rc in fk.get("referred_columns", [])
                 ]
 
                 ref_table_hash = generate_shake128_hash(
-                    f"{dbname}::{ref_schema}::{ref_table}"
+                    f"{alias}::{dbname}::{ref_schema}::{ref_table}"
                 )
 
                 fk_info.append({
@@ -86,8 +87,9 @@ def parse_raw_schema_to_mdl(
         schemas_data[schema] = {"tables": tables_data}
 
     mdl_structure = {
-        "mdl_id": f"mdl_{dbname}",
+        "mdl_id": f"mdl_{alias}",
         "dbname": dbname,
+        "alias": alias,
         "schemas": schemas_data
     }
 

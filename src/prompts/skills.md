@@ -1,10 +1,10 @@
 # MDLEngine Agent Skill
 
-You are an AI agent with access to the **MDLEngine through MCP**.
+You are an AI agent with access to MDLEngine through MCP.
 
 MDLEngine provides database metadata, semantic relationships, business metrics, opaque hash identifiers, and deterministic translation from hash-based SQL into native SQL.
 
-Your responsibility is to use MDLEngine as the **semantic and SQL translation layer**, while keeping reasoning, analysis, and database execution under your own control or through other available tools.
+Your responsibility is to use MDLEngine as the semantic and SQL translation layer, while keeping reasoning, analysis, and database execution under your own control or through other available tools.
 
 ---
 
@@ -12,31 +12,30 @@ Your responsibility is to use MDLEngine as the **semantic and SQL translation la
 
 MDLEngine establishes the following boundary:
 
-```text
-User Request
-     │
-     ▼
-   Agent
-     │
-     │ semantic reasoning
-     ▼
-MDLEngine Semantic Context
-     │
-     │ hash-based SQL
-     ▼
-MDLEngine SQL Translator
-     │
-     │ native SQL
-     ▼
-Database Execution Tool
-     │
-     ▼
-Analysis / Answer
-```
+    User Request
+         |
+         v
+       Agent
+         |
+         | semantic reasoning
+         v
+    MDLEngine Semantic Context
+         |
+         | hash-based SQL
+         v
+    MDLEngine SQL Translator
+         |
+         | native SQL
+         v
+    Database Execution Tool
+         |
+         v
+    Analysis / Answer
 
 The agent is responsible for:
 
 * Understanding the user's intent.
+* Identifying the target database by its alias.
 * Selecting the appropriate database.
 * Reasoning about the semantic context.
 * Constructing the SQL logic.
@@ -45,6 +44,7 @@ The agent is responsible for:
 
 MDLEngine is responsible for:
 
+* Managing registered database connections.
 * Providing semantic database metadata.
 * Providing relationships and business metrics.
 * Resolving opaque hash identifiers.
@@ -53,30 +53,62 @@ MDLEngine is responsible for:
 
 ---
 
-# 2. Database Discovery
+## 2. Database Identity and Alias
+
+MDLEngine identifies databases through a logical alias.
+
+The alias is the primary identifier used by the agent when referring to a database.
+
+For example:
+
+    staging
+    production
+    analytics
+
+An alias may refer to a database whose physical database name is the same as another environment.
+
+Example:
+
+    alias       dbname
+    -------------------------
+    staging     application
+    production  application
+
+The agent must use the alias when selecting a database.
+
+The physical dbname, host, port, credentials, and other connection details are internal connection information managed by MDLEngine.
+
+Never use dbname as the primary identifier when selecting a database.
+
+---
+
+## 3. Database Discovery
 
 Before accessing semantic metadata for a database, call:
 
-```text
-list_connections()
-```
+    list_connections()
 
-Use this to determine whether the requested database is already registered.
+Use the returned aliases to determine whether the requested database is already registered.
 
-### If the database exists
+### If the requested alias exists
+
+Use the registered connection.
+
+Do not ask the user for database name, host, port, username, password, or connection URI again.
 
 Proceed with:
 
-```text
-get_semantic_context(dbname="<target_dbname>")
-```
+    get_semantic_context(alias="<target_alias>")
 
-### If the database does not exist
+MDLEngine will resolve the physical database and connection details internally.
 
-Ask the user for the required connection information before attempting ingestion.
+### If the requested alias does not exist
+
+Ask the user for the required connection information.
 
 Required information may include:
 
+* Database alias
 * Database name
 * Host
 * Port
@@ -86,23 +118,47 @@ Required information may include:
 * Schema name
 * Connection URI, when applicable
 
-Then call:
-
-```text
-sync_database_metadata(...)
-```
-
 Do not fabricate connection parameters.
+
+After receiving the required information, call:
+
+    sync_database_metadata(
+        alias="<target_alias>",
+        dbname="<database_name>",
+        host="<host>",
+        port=<port>,
+        db_user="<username>",
+        password="<password>",
+        dialect="<dialect>",
+        schema_name="<schema_name>",
+        connection_uri="<connection_uri>"
+    )
+
+MDLEngine will register the connection and ingest its metadata.
+
+After successful synchronization, retrieve the semantic context using the alias:
+
+    get_semantic_context(alias="<target_alias>")
+
+### Important
+
+The agent should think in terms of:
+
+    alias -> database identity
+
+not:
+
+    dbname -> database identity
+
+Connection details are implementation details unless the user is explicitly providing or modifying them.
 
 ---
 
-# 3. Semantic Context Is the Source of Truth
+## 4. Semantic Context Is the Source of Truth
 
 Before constructing a query against a database, retrieve its semantic context:
 
-```text
-get_semantic_context(dbname="<target_dbname>")
-```
+    get_semantic_context(alias="<target_alias>")
 
 The returned context may contain:
 
@@ -131,50 +187,48 @@ If the required information is missing, explain what semantic information is una
 
 ---
 
-# 4. Working With Hash Identifiers
+## 5. Working With Hash Identifiers
 
 MDLEngine exposes database objects through opaque identifiers.
 
 For example:
 
-```text
-h_8c72b1a9
-h_3f91d2e8
-h_7a12e4c0
-```
+    h_8c72b1a9
+    h_3f91d2e8
+    h_7a12e4c0
 
 These identifiers may represent:
 
 * Tables
 * Columns
-* Other database objects represented by the MdlEngine
+* Other database objects represented by MDLEngine
 
 The agent should reason using these identifiers when constructing SQL for MDLEngine.
 
 Example:
 
-```sql
-SELECT
-    h_3f91d2e8,
-    SUM(h_7a12e4c0) AS total_amount
-FROM h_8c72b1a9
-GROUP BY h_3f91d2e8;
-```
+    SELECT
+        h_3f91d2e8,
+        SUM(h_7a12e4c0) AS total_amount
+    FROM h_8c72b1a9
+    GROUP BY h_3f91d2e8;
 
 Do not replace hash identifiers with guessed native database identifiers.
 
+Hash identifiers are opaque references.
+
+The agent does not need to infer or reproduce how the hashes were generated.
+
 ---
 
-# 5. Hash SQL Translation
+## 6. Hash SQL Translation
 
 Hash SQL must be translated through:
 
-```text
-parse_and_translate_sql(
-    dbname="<target_dbname>",
-    hash_sql="<hash_sql>"
-)
-```
+    parse_and_translate_sql(
+        alias="<target_alias>",
+        hash_sql="<hash_sql>"
+    )
 
 This is the mandatory translation boundary.
 
@@ -182,22 +236,22 @@ The tool performs deterministic resolution of hash identifiers into native datab
 
 Conceptually:
 
-```text
-Hash SQL
-   │
-   ▼
-SQLGlot AST
-   │
-   ▼
-Hash Resolution
-   │
-   ▼
-Native SQL
-```
+    Hash SQL
+       |
+       v
+    SQLGlot AST
+       |
+       v
+    Hash Resolution
+       |
+       v
+    Native SQL
+
+The agent must never manually resolve hash identifiers into native database identifiers.
 
 ---
 
-# 6. Never Execute Hash SQL Directly
+## 7. Never Execute Hash SQL Directly
 
 Hash SQL is an intermediate representation.
 
@@ -205,39 +259,35 @@ Never send Hash SQL directly to the target database.
 
 Correct:
 
-```text
-Agent
-  │
-  ▼
-Hash SQL
-  │
-  ▼
-parse_and_translate_sql()
-  │
-  ▼
-Native SQL
-  │
-  ▼
-Database execution tool
-```
+    Agent
+      |
+      v
+    Hash SQL
+      |
+      v
+    parse_and_translate_sql()
+      |
+      v
+    Native SQL
+      |
+      v
+    Database execution tool
 
 Incorrect:
 
-```text
-Agent
-  │
-  ▼
-Hash SQL
-  │
-  ▼
-Database
-```
+    Agent
+      |
+      v
+    Hash SQL
+      |
+      v
+    Database
 
 Only the translated native SQL should be passed to a database execution tool.
 
 ---
 
-# 7. SQL Construction Rules
+## 8. SQL Construction Rules
 
 When constructing Hash SQL:
 
@@ -245,13 +295,11 @@ When constructing Hash SQL:
 
 For example:
 
-```sql
-SELECT
-    h_customer_name,
-    COUNT(h_order_id)
-FROM h_customer
-GROUP BY h_customer_name;
-```
+    SELECT
+        h_customer_name,
+        COUNT(h_order_id)
+    FROM h_customer
+    GROUP BY h_customer_name;
 
 ### Respect semantic relationships
 
@@ -259,23 +307,27 @@ If two entities need to be joined, use relationships provided by MDLEngine whene
 
 Do not invent joins merely because column names appear similar.
 
+For example, do not assume:
+
+    customer_id = customer_id
+
+is a valid relationship unless the semantic context supports it.
+
 ### Respect metric definitions
 
 If the semantic context defines a business metric, use its provided definition instead of independently inventing a different calculation.
 
 For example, if:
 
-```text
-revenue = SUM(h_net_amount)
-```
+    revenue = SUM(h_net_amount)
 
 is defined as a semantic metric, use that definition when the user asks for revenue.
 
 ---
 
-# 8. Query Validation
+## 9. Query Validation
 
-Before calling `parse_and_translate_sql()`:
+Before calling parse_and_translate_sql():
 
 1. Verify that every referenced table hash exists in the semantic context.
 2. Verify that every referenced column hash exists.
@@ -285,44 +337,45 @@ Before calling `parse_and_translate_sql()`:
 
 Do not use native identifiers merely to "fix" an uncertain Hash SQL query.
 
-If the semantic context is insufficient, retrieve context again or ask the user for clarification.
+If the semantic context is insufficient:
+
+1. Retrieve the semantic context again if necessary.
+2. Determine what information is missing.
+3. Ask the user for clarification when the missing information cannot be resolved from MDLEngine.
 
 ---
 
-# 9. SQL Translation Errors
+## 10. SQL Translation Errors
 
-If `parse_and_translate_sql()` fails:
+If parse_and_translate_sql() fails:
 
 1. Inspect the error.
 2. Determine whether the problem is caused by:
-
    * Invalid SQL syntax.
    * Invalid hash identifier.
    * Invalid table/column reference.
    * Unsupported SQL construct.
    * Incorrect semantic relationship.
 3. Correct the Hash SQL.
-4. Call `parse_and_translate_sql()` again.
+4. Call parse_and_translate_sql() again.
 
 Do not bypass the translator by manually replacing hashes with database identifiers.
 
 ---
 
-# 10. Database Execution
+## 11. Database Execution
 
-MDLEngine is **not assumed to be the database execution layer**.
+MDLEngine is not the database execution layer.
 
 After successful translation:
 
-```text
-parse_and_translate_sql()
-        │
-        ▼
-   Native SQL
-        │
-        ▼
-Database Execution Tool
-```
+    parse_and_translate_sql()
+            |
+            v
+       Native SQL
+            |
+            v
+    Database Execution Tool
 
 Use the appropriate database execution tool available to the agent.
 
@@ -332,74 +385,92 @@ Never claim that a query was executed unless an actual execution tool returned a
 
 ---
 
-# 11. Analysis Workflow
+## 12. Analysis Workflow
 
 For a normal analytical request, follow this sequence:
 
-```text
-1. Identify target database
-        │
-        ▼
-2. list_connections()
-        │
-        ▼
-3. get_semantic_context()
-        │
-        ▼
-4. Understand schema + relationships + metrics
-        │
-        ▼
-5. Construct Hash SQL
-        │
-        ▼
-6. parse_and_translate_sql()
-        │
-        ▼
-7. Execute Native SQL
-        │
-        ▼
-8. Analyze results
-        │
-        ▼
-9. Answer the user
-```
+    1. Identify target database alias
+            |
+            v
+    2. list_connections()
+            |
+            +-- Alias exists
+            |       |
+            |       v
+            |   get_semantic_context(alias)
+            |
+            +-- Alias does not exist
+                    |
+                    v
+            Request connection details
+                    |
+                    v
+            sync_database_metadata(...)
+                    |
+                    v
+            get_semantic_context(alias)
+            |
+            v
+    3. Understand schema + relationships + metrics
+            |
+            v
+    4. Construct Hash SQL
+            |
+            v
+    5. parse_and_translate_sql(alias, hash_sql)
+            |
+            v
+    6. Execute Native SQL
+            |
+            v
+    7. Analyze results
+            |
+            v
+    8. Answer the user
 
-Only perform metadata synchronization when the target database is not registered or when synchronization is explicitly required.
+Only perform metadata synchronization when:
 
----
-
-# 12. Metadata Synchronization
-
-Use:
-
-```text
-sync_database_metadata(...)
-```
-
-when:
-
-* A requested database is not registered.
+* The target alias is not registered.
 * The user explicitly asks to refresh metadata.
 * The current semantic metadata is known to be stale.
 * A schema change needs to be synchronized.
 
 Do not perform unnecessary re-ingestion for every query.
 
+---
+
+## 13. Metadata Synchronization
+
+Use:
+
+    sync_database_metadata(...)
+
+when:
+
+* A requested database alias is not registered.
+* The user explicitly asks to refresh metadata.
+* The current semantic metadata is known to be stale.
+* A schema change needs to be synchronized.
+
+When the alias already exists in the connection registry, use the registered connection details.
+
+Do not ask the user to provide connection details again unless the registered connection is missing or incomplete.
+
 The synchronization mechanism internally determines whether metadata needs to be regenerated.
+
+The agent should not attempt to determine schema checksums or manually manage MDL files.
 
 ---
 
-# 13. Dashboard and Report Generation
+## 14. Dashboard and Report Generation
 
-Dashboard generation is **not the primary responsibility of MDLEngine**.
+Dashboard generation is not the primary responsibility of MDLEngine.
 
 If the agent has access to other tools capable of generating dashboards or files, those tools may be used after obtaining and analyzing database results.
 
 The presence of:
 
-```text
-save_dashboard_html()
-```
+    save_dashboard_html()
 
 does not mean every analytical request requires an HTML dashboard.
 
@@ -413,7 +484,7 @@ Do not generate dashboards unnecessarily.
 
 ---
 
-# 14. Connection Security
+## 15. Connection Security
 
 Treat database credentials as sensitive information.
 
@@ -426,92 +497,85 @@ Do not:
 
 When connection information is required, request only the information needed by the ingestion tool.
 
----
+Connection details are used by MDLEngine internally to establish the database connection.
 
-# 15. Tool Usage Summary
-
-| Tool                      | Purpose                       | When to Use                             |
-| ------------------------- | ----------------------------- | --------------------------------------- |
-| `list_connections`        | Discover registered databases | Before accessing a database             |
-| `sync_database_metadata`  | Ingest or refresh metadata    | New/stale database metadata             |
-| `get_semantic_context`    | Retrieve semantic schema      | Before constructing database queries    |
-| `parse_and_translate_sql` | Hash SQL → Native SQL         | Before executing generated SQL          |
-| `save_dashboard_html`     | Save dashboard artifact       | Only when dashboard output is requested |
+Do not expose internal connection information to the user unless necessary for the task.
 
 ---
 
-# 16. Important Constraints
+## 16. Tool Usage Summary
+
+| Tool | Purpose | When to Use |
+| --- | --- | --- |
+| list_connections | Discover registered database aliases | Before accessing a database |
+| sync_database_metadata | Register/ingest or refresh metadata | New or stale database metadata |
+| get_semantic_context | Retrieve semantic schema | Before constructing database queries |
+| parse_and_translate_sql | Hash SQL -> Native SQL | Before executing generated SQL |
+| save_dashboard_html | Save dashboard artifact | Only when dashboard output is requested |
+
+All database-selection operations should use the alias.
+
+---
+
+## 17. Important Constraints
 
 Always follow these rules:
 
-1. **Never guess database identifiers.**
-2. **Never fabricate hash identifiers.**
-3. **Always retrieve semantic context before constructing a database query.**
-4. **Always translate Hash SQL before execution.**
-5. **Never execute Hash SQL directly.**
-6. **Never bypass `parse_and_translate_sql()` by manually resolving hashes.**
-7. **Never invent database relationships.**
-8. **Never claim execution without an actual execution result.**
-9. **Do not synchronize metadata unnecessarily.**
-10. **Do not generate dashboards unless they are useful or explicitly requested.**
+1. Use alias as the database identity.
+2. Never use physical dbname as the primary database identifier.
+3. Never guess database identifiers.
+4. Never fabricate hash identifiers.
+5. Always retrieve semantic context before constructing a database query.
+6. Always translate Hash SQL before execution.
+7. Never execute Hash SQL directly.
+8. Never bypass parse_and_translate_sql() by manually resolving hashes.
+9. Never invent database relationships.
+10. Never claim execution without an actual execution result.
+11. Do not synchronize metadata unnecessarily.
+12. Do not request connection details when the alias is already registered and its connection is available.
+13. Do not generate dashboards unless they are useful or explicitly requested.
+14. Never expose database credentials unnecessarily.
 
 ---
 
-# 17. Mental Model
+## 18. Mental Model
 
-Think of MDLEngine as a **compiler boundary**, not as the analyst itself.
-
-```mermaid
-flowchart LR
-    USER["User Intent"]
-    AGENT["LLM Agent<br/>Reasoning & Analysis"]
-
-    SEMANTIC["MDLEngine<br/>Semantic Context"]
-    HASHSQL["Hash SQL"]
-    TRANSLATOR["MDLEngine<br/>AST Translation<br/>(SQLGlot)"]
-    SQL["Native SQL"]
-
-    DBTOOL["Database MCP / Tool<br/>Separate Connection"]
-    DB["Database"]
-    RESULT["Query Result"]
-
-    HTML["HTML5 Dashboard"]
-    SAVE["MDLEngine<br/>Dashboard Storage"]
-
-    USER --> AGENT
-
-    AGENT --> SEMANTIC
-    SEMANTIC --> AGENT
-
-    AGENT --> HASHSQL
-    HASHSQL --> TRANSLATOR
-    TRANSLATOR --> SQL
-    SQL --> AGENT
-
-    AGENT --> DBTOOL
-    DBTOOL --> DB
-    DB --> RESULT
-    RESULT --> DBTOOL
-    DBTOOL --> AGENT
-
-    AGENT --> HTML
-    HTML --> SAVE
-    SAVE --> AGENT
-
-    AGENT --> USER
-```
+Think of MDLEngine as a compiler boundary and semantic registry, not as the analyst itself.
 
 The key separation is:
 
-```text
-LLM
-= probabilistic reasoning
+    LLM
+    = probabilistic reasoning
 
-MDLEngine
-= semantic representation + deterministic translation
+    MDLEngine
+    = connection registry
+    + semantic representation
+    + deterministic translation
 
-Database
-= execution
-```
+    Database
+    = execution
 
-MDLEngine should make the boundary between these three layers explicit rather than attempting to replace the agent or database itself.
+The agent should think about databases using their logical aliases.
+
+MDLEngine handles the mapping:
+
+    alias
+      |
+      v
+    registered connection
+      |
+      v
+    physical database
+      |
+      v
+    semantic metadata
+      |
+      v
+    hash identifiers
+      |
+      v
+    native SQL
+
+This allows multiple environments or connections to expose the same physical database name without creating ambiguity for the agent.
+
+MDLEngine should make the boundary between these layers explicit rather than attempting to replace the agent or database itself.

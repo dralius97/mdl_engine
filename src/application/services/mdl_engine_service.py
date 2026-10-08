@@ -1,9 +1,8 @@
-from typing import Dict, Any, Optional
 import yaml
-from ...domain.transformations.sql_translator import translate_hash_sql
-from ...infrastructure.persistence.sqlite_metadata_repo import SQLiteMetadataRepository
-from ...infrastructure.persistence.sqlite_audit_log_repo import SQLiteAuditLogRepository
-from ...infrastructure.persistence.sqlite_connection_repo import SQLiteConnectionRepository
+from src.domain.transformations.sql_translator import translate_hash_sql
+from src.infrastructure.persistence.sqlite_metadata_repo import SQLiteMetadataRepository
+from src.infrastructure.persistence.sqlite_audit_log_repo import SQLiteAuditLogRepository
+from src.infrastructure.persistence.sqlite_connection_repo import SQLiteConnectionRepository
 
 class MDLEngineService:
     def __init__(
@@ -16,21 +15,21 @@ class MDLEngineService:
         self.audit_log_repo = audit_log_repo
         self.connection_repo = connection_repo
 
-    def get_context(self, dbname: str) -> str:
+    def get_context(self, alias: str) -> str:
         """
         Mengambil gabungan konteks lengkap: 
         Full Hashtable Mapping (Hash ID <-> Path/Name asli), MDL Schema, dan Verified Relations.
         """
-        dbname = dbname.lower().strip()
-        mdl_raw = self.metadata_repo.get_mdl_raw(dbname)
-        full_hashmap = self.metadata_repo.get_hashtable(dbname)
+        alias = alias.lower().strip()
+        mdl_raw = self.metadata_repo.get_mdl_raw(alias)
+        full_hashmap = self.metadata_repo.get_hashtable(alias)
         
         if not mdl_raw or not full_hashmap:
-            return f"Error: Metadata MDL atau Hashmap untuk database '{dbname}' tidak ditemukan."
+            return f"Error: Metadata MDL atau Hashmap untuk database '{alias}' tidak ditemukan."
 
         try:
             mdl_data = yaml.safe_load(mdl_raw) or {}
-            relations_data = self.metadata_repo.get_relations(dbname)
+            relations_data = self.metadata_repo.get_relations(alias)
             
             # Format hashtable agar sangat mudah dibaca & dipahami LLM Agent
             formatted_hashtable = {
@@ -47,7 +46,8 @@ class MDLEngineService:
                     formatted_hashtable["columns"][hash_id] = f"{parts[2]}::{parts[3]}" # table::column
                     
             combined_context = {
-                "database": dbname,
+                "database": mdl_data["dbname"],
+                "alias": alias,
                 "hashtable": formatted_hashtable,
                 "mdl": mdl_data,
                 "relations": [r for r in relations_data if r.get("status") == "verified"],
@@ -56,21 +56,21 @@ class MDLEngineService:
             return yaml.dump(combined_context, sort_keys=False, default_flow_style=False)
 
         except Exception as e:
-            return f"Error loading context for '{dbname}': {str(e)}"
+            return f"Error loading context for '{alias}': {str(e)}"
 
-    def translate_and_log_sql(self, dbname: str, hash_sql: str) -> str:
+    def translate_and_log_sql(self, alias: str, hash_sql: str) -> str:
         """
         Mentranslasikan Hash SQL menjadi Executable SQL dan mencatatnya di Audit Log.
         """
-        dbname = dbname.lower().strip()
-        hashmap = self.metadata_repo.get_hashtable(dbname)
+        alias = alias.lower().strip()
+        hashmap = self.metadata_repo.get_hashtable(alias)
 
         if not hashmap:
-            return f"Error: Hashmap lookup untuk database '{dbname}' tidak ditemukan."
+            return f"Error: Hashmap lookup untuk database '{alias}' tidak ditemukan."
 
         try:
             # Ambil dialect dari koneksi tersimpan (fallback ke postgres)
-            conn_info = self.connection_repo.get_connection_details(dbname)
+            conn_info = self.connection_repo.get_connection_details(alias)
             dialect = conn_info.get("dialect", "postgres") if conn_info else "postgres"
 
             # 1. Pure FP Translation
@@ -82,7 +82,7 @@ class MDLEngineService:
 
             # 2. Side-Effect: Save Audit Log
             self.audit_log_repo.save_translation_log(
-                dbname=dbname,
+                alias=alias,
                 hash_sql=hash_sql,
                 executable_sql=executable_sql
             )

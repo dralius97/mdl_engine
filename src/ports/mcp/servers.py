@@ -59,7 +59,8 @@ def list_connections() -> List[Dict[str, Any]]:
 
 @mcp.tool()
 def sync_database_metadata(
-    dbname: str,
+    alias: str,
+    dbname: Optional[str] = None,
     host: Optional[str] = None,
     port: Optional[int] = 5432,
     db_user: Optional[str] = None,
@@ -73,34 +74,47 @@ def sync_database_metadata(
     Meng-ingest skema database target, membuat Hash ID, mengekstrak relasi FK,
     dan menyimpannya ke registry. Bisa menerima Host/Creds atau Connection URI.
     """
-    dbname = dbname.lower().strip()
+    alias = alias.lower().strip()
 
-    # Resolve Connection URI jika dikirim parameter terpisah
-    if not connection_uri:
-        if host and db_user and password:
-            if dialect == "sqlite":
-                connection_uri = f"sqlite:///{dbname}.db"
+    # Resolve koneksi berdasarkan alias yang sudah terdaftar
+    existing_conn = connection_repo.get_connection_details(alias)
+
+    if existing_conn:
+        dbname = existing_conn["dbname"]
+        connection_uri = existing_conn["connection_uri"]
+        host = existing_conn["host"]
+        port = existing_conn["port"]
+        db_user = existing_conn["db_user"]
+        dialect = existing_conn["dialect"]
+        schema_name = existing_conn.get("schema_name")
+
+    else:
+        # Belum ada koneksi → gunakan parameter yang diberikan agent
+        if not connection_uri:
+            if host and dbname and db_user and password:
+                if dialect == "sqlite":
+                    connection_uri = f"sqlite:///{dbname}.db"
+                else:
+                    connection_uri = (
+                        f"{dialect}://{db_user}:{password}"
+                        f"@{host}:{port}/{dbname}"
+                    )
             else:
-                connection_uri = f"{dialect}://{db_user}:{password}@{host}:{port}/{dbname}"
-        else:
-            # Fallback ke koneksi yang sudah terdaftar sebelumnya
-            existing_conn = connection_repo.get_connection_details(dbname)
-            if existing_conn:
-                connection_uri = existing_conn["connection_uri"]
-                host = existing_conn["host"]
-                port = existing_conn["port"]
-                db_user = existing_conn["db_user"]
-                dialect = existing_conn["dialect"]
-                schema_name = schema_name or existing_conn.get("schema_name")
-            else:
-                return f"Error: Informasi koneksi untuk '{dbname}' tidak lengkap. Mohon berikan host, user, dan password."
+                return (
+                    f"Error: Informasi koneksi untuk alias '{alias}' "
+                    "tidak ditemukan. Mohon berikan detail koneksi."
+                )
 
     if connection_uri is None:
-        return f"Error: Connection URI untuk '{dbname}' tidak ditemukan."
+        return f"Error: Connection URI untuk alias '{alias}' tidak ditemukan."    
 
+    if dbname is None:
+        return f"Error: Connection dbname untuk alias '{alias}' tidak ditemukan."
+    
     try:
         result = ingestion_service.sync_database(
             dbname=dbname,
+            alias=alias,
             host=host or "localhost",
             port=port or 5432,
             db_user=db_user or "unknown",
@@ -111,24 +125,23 @@ def sync_database_metadata(
         )
         return result["message"]
     except Exception as e:
-        return f"Gagal melakukan sync database '{dbname}': {str(e)}"
-
+        return f"Gagal melakukan sync database '{alias}': {str(e)}"
 
 @mcp.tool()
-def get_semantic_context(dbname: str) -> str:
+def get_semantic_context(alias: str) -> str:
     """Mengambil seluruh konteks semantik ber-hash (MDL & Relasi) untuk database tertentu.
     Harus dipanggil LLM Agent sebelum menyusun query SQL.
     """
-    return mdl_engine_service.get_context(dbname)
+    return mdl_engine_service.get_context(alias)
 
 
 @mcp.tool()
-def parse_and_translate_sql(dbname: str, hash_sql: str) -> str:
+def parse_and_translate_sql(alias: str, hash_sql: str) -> str:
     """
     Mentranslasikan Hash SQL buatan LLM menjadi Executable SQL dengan identifier asli.
     Mencatat riwayat translasi ke audit log.
     """
-    return mdl_engine_service.translate_and_log_sql(dbname=dbname, hash_sql=hash_sql)
+    return mdl_engine_service.translate_and_log_sql(alias=alias, hash_sql=hash_sql)
 
 
 @mcp.tool()

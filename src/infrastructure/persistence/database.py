@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from ...config import Config
+from src.config import Config
 
 def get_sqlite_connection() -> sqlite3.Connection:
     db_path = Config.get_db_path()
@@ -14,9 +14,11 @@ def init_db():
     cursor = conn.cursor()
 
     # 1. Connection Registry
+    # Alias is the logical identity of a connection.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS connection_registry (
-            dbname TEXT PRIMARY KEY,
+            alias TEXT PRIMARY KEY,
+            dbname TEXT NOT NULL,
             host TEXT NOT NULL,
             port INTEGER NOT NULL DEFAULT 5432,
             db_user TEXT NOT NULL,
@@ -28,21 +30,25 @@ def init_db():
         );
     """)
 
-    # 2. Hashtable Store (Relational Lookup untuk SQLTranslator)
+    # 2. Hashtable Store
+    # Alias acts as the metadata namespace for each connection.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS hashtable_store (
-            dbname TEXT NOT NULL,
+            alias TEXT NOT NULL,
             hash_id TEXT NOT NULL,
             full_path TEXT NOT NULL,
-            PRIMARY KEY (dbname, hash_id)
+            PRIMARY KEY (alias, hash_id)
         );
     """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_hashtable_lookup ON hashtable_store(dbname, hash_id);")
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_hashtable_lookup
+        ON hashtable_store(alias, hash_id);
+    """)
 
     # 3. Relations Store
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS relation_store (
-            dbname TEXT PRIMARY KEY,
+            alias TEXT PRIMARY KEY,
             relations_json TEXT NOT NULL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -52,17 +58,17 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS sql_translation_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            dbname TEXT NOT NULL,
+            alias TEXT NOT NULL,
             hash_sql TEXT NOT NULL,
             executable_sql TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
 
-    # 5. Checksum Store (Untuk Lazy Re-ingest)
+    # 5. Checksum Store
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS checksum_store (
-            dbname TEXT PRIMARY KEY,
+            alias TEXT PRIMARY KEY,
             checksum TEXT NOT NULL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );

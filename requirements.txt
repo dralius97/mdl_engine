@@ -1,0 +1,5 @@
+sqlalchemy
+sqlglot
+fastmcp
+pyyaml
+psycopg2-binary

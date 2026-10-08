@@ -1,0 +1,7 @@
+.env
+/src_proto/
+/sandbox/
+folder_structure.txt
+*/__pycache__/*
+*.pyc
+.vscode

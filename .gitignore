@@ -5,3 +5,4 @@ folder_structure.txt
 */__pycache__/*
 *.pyc
 .vscode
+data

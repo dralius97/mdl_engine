@@ -1,6 +1,7 @@
 
 services:
   mdl-engine:
+    image: mdl-engine:local
     build:
       context: .
       dockerfile: Dockerfile

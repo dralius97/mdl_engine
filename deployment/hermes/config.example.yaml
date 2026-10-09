@@ -1,0 +1,4 @@
+mcp_servers:
+  mdlEngine:
+    url: http://172.21.0.1:38000/sse
+    enabled: true

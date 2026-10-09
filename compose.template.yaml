@@ -1,0 +1,24 @@
+
+services:
+  mdl-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mdl-engine
+    restart: unless-stopped
+
+    ports:
+      - "38000:38000"
+
+    volumes:
+      - ./data/configs:/root/.mdlEngine/configs
+      - ./data/outputs:/root/.mdlEngine/outputs
+      - mdl_engine_metadata:/root/.mdlEngine/database
+
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      MDL_ENGINE_DB_PATH: /root/.mdlEngine/database/metadata.db
+
+volumes:
+  mdl_engine_metadata:

@@ -6,10 +6,11 @@ class Config:
     BASE_DIR = Path.home() / ".mdlEngine"
     @classmethod
     def get_db_path(cls) -> str:
-        # Menjamin direktori ~/.semantic_layer/ terbuat otomatis
-        cls.BASE_DIR.mkdir(parents=True, exist_ok=True)
-        return str(cls.BASE_DIR / "metadata.db")
-
+        db_path = Path(
+            os.getenv("MDL_ENGINE_DB_PATH", str(cls.BASE_DIR / "database" / "metadata.db"))
+            )
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        return str(db_path)
     @classmethod
     def get_output_dir(cls) -> str:
         output_path = cls.BASE_DIR / "outputs"

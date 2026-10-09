@@ -333,28 +333,74 @@ The alias is the logical identity used to address a connection. The physical `db
 
 ### Prerequisites
 
-- Python 3.11+
-- pip
+- Python 3.11+ for local installation
+- Docker Engine and Docker Compose plugin for containerized deployment
 
-From the repository root, install MDLEngine and its dependencies:
+### Local installation
+
+From the repository root:
 
 ```bash
 pip install .
-```
-
-Start the MCP server:
-
-```bash
 python -m src.main
 ```
 
-The server listens on port `38000` and exposes the MCP SSE endpoint at:
+The MCP server listens on port `38000` and exposes the SSE endpoint at:
 
 ```text
 http://localhost:38000/sse
 ```
 
-Keep MDLEngine running while the Hermes agent connects to it.
+Keep the server running while an MCP client or agent connects to it.
+
+### Docker Compose deployment
+
+The repository includes `Dockerfile` and `compose.template.yaml`. From the repository root, build and start MDLEngine:
+
+```bash
+docker compose -f compose.template.yaml build mdl-engine
+docker compose -f compose.template.yaml up -d
+docker compose -f compose.template.yaml ps
+docker compose -f compose.template.yaml logs --tail=100 mdl-engine
+```
+
+The service exposes port `38000` on the host. From the host machine, use:
+
+```text
+http://localhost:38000/sse
+```
+
+The Compose template persists data through these mounts:
+
+| Container path | Host storage | Purpose |
+| --- | --- | --- |
+| `/root/.mdlEngine/configs` | `./data/configs` | Per-connection MDL configuration files |
+| `/root/.mdlEngine/outputs` | `./data/outputs` | Generated HTML dashboards and reports |
+| `/root/.mdlEngine/database` | Named volume `mdl_engine_metadata` | Internal SQLite metadata database |
+
+The named volume is separate from the generated output directories. Do not use `docker compose down -v` if you want to preserve the metadata database.
+
+To inspect the mounted paths and verify the effective database/output directories:
+
+```bash
+docker inspect mdl-engine --format '{{json .Mounts}}'
+docker compose -f compose.template.yaml exec mdl-engine python -c "from src.config import Config; print('DB:', Config.get_db_path()); print('OUTPUT:', Config.get_output_dir())"
+docker compose -f compose.template.yaml exec mdl-engine sh -c 'ls -lah /root/.mdlEngine/database /root/.mdlEngine/configs /root/.mdlEngine/outputs'
+```
+
+For a quick SSE connectivity check:
+
+```bash
+curl -i -N --max-time 5 http://localhost:38000/sse
+```
+
+An SSE connection may remain open until the timeout; check the server logs for startup or connection errors as well.
+
+### PostgreSQL driver
+
+MDLEngine currently declares `psycopg[binary]` in `requirements.txt`. This installs Psycopg 3 with its packaged binary implementation, avoiding a dependency on a system `libpq` installation in the container. The separate `psycopg2-binary` package provides the `psycopg2` module and does not satisfy imports of `psycopg`.
+
+SQLAlchemy's PostgreSQL URL driver must match an installed driver. For Psycopg 3, use a URL such as `postgresql+psycopg://...`; a plain `postgresql://...` URL may select a different driver depending on the installed packages and SQLAlchemy configuration.
 
 ---
 
@@ -375,40 +421,79 @@ Target Database(s)
 
 ### 1. Install the MDLEngine skill
 
-The skill source is maintained in this repository at `src/prompts/skills.md`. Copy it to the Hermes skill directory.
-
-Run the following from the repository root in an environment where the repository and Hermes home directory are both accessible:
+The source skill is maintained at `src/prompts/skills.md`. From the repository root, copy it to the lowercase Hermes skills directory:
 
 ```bash
-mkdir -p ~/.hermes/SKILL/mdlEngine
-cp src/prompts/skills.md ~/.hermes/SKILL/mdlEngine/SKILL.md
+mkdir -p ~/.hermes/skills/mdlEngine
+cp src/prompts/skills.md ~/.hermes/skills/mdlEngine/SKILL.md
 ```
 
-If Hermes runs in a separate container, run the copy operation in an environment that can access the repository and the mounted Hermes home directory. Adjust the source or destination path to match your mounts.
+Ensure the destination is inside the Hermes home directory used by the running agent. If Hermes runs in a container with a mounted home directory, copy the file in that environment or into the corresponding host-mounted directory.
 
 ### 2. Configure the MCP server
 
-Add the following entry to `~/.hermes/config.yml`:
+Add this entry to `~/.hermes/config.yaml` and merge it with the existing configuration:
 
 ```yaml
 mcp_servers:
-  mdlEngine:
-    url: http://172.21.0.1:38000/sse
+  mdl-engine:
+    url: http://mdl-engine:38000/sse
     enabled: true
 ```
 
-The URL above reflects one local Docker networking setup. Replace `172.21.0.1` with an address reachable from the Hermes environment. If both services share a Docker Compose network, use the MDLEngine service name and port instead.
+The hostname `mdl-engine` works when Hermes and MDLEngine are attached to the same Docker network. In the tested local Compose setup, the network is `mdl-engine_default`. If Hermes runs in a separate container on the same Docker host, connect it to that network:
 
-Merge this entry into the existing configuration rather than overwriting other MCP servers or Hermes settings.
+```bash
+docker network connect mdl-engine_default <agent-container>
+```
 
-### 3. Restart Hermes
+Replace `<agent-container>` with the actual Hermes container name or ID. If the Compose project or network has a different name, inspect available networks with `docker network ls` and use the actual network name.
 
-Restart the Hermes agent after installing the skill or changing the MCP configuration. Automatic tool reloads may not consistently pick up changes.
+If Hermes runs outside that Docker network, configure an address reachable from its environment instead.
 
-After restarting, verify that the MDLEngine tools are available to the agent.
+### 3. Restart Hermes and verify tool execution
+
+Restart Hermes after changing the skill or MCP configuration. Confirm more than tool discovery: ask Hermes to execute an actual MDLEngine tool and verify that the tool result is returned.
+
+For an analytical request, the expected workflow is:
+
+1. Discover or register the target connection using its logical alias.
+2. Run `sync_database_metadata` when the connection is new or metadata needs refreshing.
+3. Retrieve `get_semantic_context`.
+4. Construct hash-based SQL and call `parse_and_translate_sql`.
+5. Execute the translated native SQL using the available database execution tool.
+6. Use the returned data to generate a dashboard and save it with `save_dashboard_html`.
+
+MDLEngine translates SQL; database query execution is performed by the agent's available database execution tool.
 
 ---
- 
+
+## End-to-End Validation
+
+The initial local Docker deployment was validated through the following path:
+
+- Docker image built and the service started successfully.
+- The MCP SSE endpoint connected and returned the registered tool list.
+- Persistence paths were checked.
+- Hermes discovered MDLEngine and invoked its tools.
+- PostgreSQL metadata synchronization completed after the Psycopg 3 binary dependency was declared.
+- Hermes retrieved semantic context, used hash identifiers for the required tables and columns, and translated hash SQL through `parse_and_translate_sql`.
+- The translated SQL results were used to generate the patient demographics and payment dashboard.
+
+The reported dashboard artifact was saved inside the container at:
+
+```text
+/root/.mdlEngine/outputs/patient_demographics_payment.html
+```
+
+Because `/root/.mdlEngine/outputs` is mounted to `./data/outputs` by the Compose template, the corresponding host path is:
+
+```text
+./data/outputs/patient_demographics_payment.html
+```
+
+This records the successful initial end-to-end test; it does not claim that automated integration tests currently cover every database dialect.
+
 ## Design Principles
 
 ### Deterministic Core, Probabilistic Interface

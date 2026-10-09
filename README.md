@@ -331,43 +331,84 @@ The alias is the logical identity used to address a connection. The physical `db
 
 ## Installation
 
-From the project root:
+### Prerequisites
+
+- Python 3.11+
+- pip
+
+From the repository root, install MDLEngine and its dependencies:
 
 ```bash
 pip install .
 ```
 
+Start the MCP server:
+
+```bash
+python -m src.main
+```
+
+The server listens on port `38000` and exposes the MCP SSE endpoint at:
+
+```text
+http://localhost:38000/sse
+```
+
+Keep MDLEngine running while the Hermes agent connects to it.
+
 ---
 
 ## Running with Hermes
 
-MDLEngine is designed to run as a separate service alongside an agent such as Hermes.
-
-A typical deployment uses Docker Compose with both services attached to the same Docker network:
+MDLEngine runs as a separate service alongside an agent such as Hermes.
 
 ```text
-Hermes
-  │
-  │ MCP / SSE
-  ▼
-MDLEngine
-  │
-  ▼
+Hermes Agent
+    │
+    │ MCP / SSE
+    ▼
+MDLEngine :38000
+    │
+    ▼
 Target Database(s)
 ```
 
-The MDLEngine service listens on port `38000` for its SSE MCP transport. Within a Docker Compose network, Hermes can connect to the MDLEngine service using its Compose service name rather than a host IP.
+### 1. Install the MDLEngine skill
 
-For example, if the service is named `mdl-engine`:
+The skill source is maintained in this repository at `src/prompts/skills.md`. Copy it to the Hermes skill directory.
 
-```text
-http://mdl-engine:38000
+Run the following from the repository root in an environment where the repository and Hermes home directory are both accessible:
+
+```bash
+mkdir -p ~/.hermes/SKILL/mdlEngine
+cp src/prompts/skills.md ~/.hermes/SKILL/mdlEngine/SKILL.md
 ```
 
-The exact MCP configuration depends on the Hermes deployment and its MCP client configuration.
+If Hermes runs in a separate container, run the copy operation in an environment that can access the repository and the mounted Hermes home directory. Adjust the source or destination path to match your mounts.
+
+### 2. Configure the MCP server
+
+Add the following entry to `~/.hermes/config.yml`:
+
+```yaml
+mcp_servers:
+  mdlEngine:
+    url: http://172.21.0.1:38000/sse
+    enabled: true
+```
+
+The URL above reflects one local Docker networking setup. Replace `172.21.0.1` with an address reachable from the Hermes environment. If both services share a Docker Compose network, use the MDLEngine service name and port instead.
+
+Merge this entry into the existing configuration rather than overwriting other MCP servers or Hermes settings.
+
+### 3. Restart Hermes
+
+Restart the Hermes agent after installing the skill or changing the MCP configuration. Automatic tool reloads may not consistently pick up changes.
+
+After restarting, verify that the MDLEngine tools are available to the agent.
 
 ---
-
+ 
 ## Design Principles
 
 ### Deterministic Core, Probabilistic Interface
